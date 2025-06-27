@@ -1,12 +1,9 @@
 import streamlit as st
 import pandas as pd
-from sklearn.preprocessing import StandardScaler
 import joblib
 import numpy as np
 
-# -------------------------
-# Cargar modelos y scaler
-# -------------------------
+# Carga de modelos y scaler
 @st.cache_resource
 def load_models():
     try:
@@ -22,88 +19,88 @@ def load_models():
         scaler = joblib.load('feature_scaler.pkl')
         return models, scaler
     except FileNotFoundError as e:
-        st.error(f"Error cargando archivos: {e}")
+        st.error(f"Archivo no encontrado: {e}")
         return None, None
     except Exception as e:
-        st.error(f"Error inesperado al cargar modelos: {e}")
+        st.error(f"Error cargando modelos: {e}")
         return None, None
 
-# -------------------------
-# Configuración inicial
-# -------------------------
 models, scaler = load_models()
-expected_features = [
-    'Velocidad del Viento (m/s)',
-    'Dirección del viento (Grados)',
-    'Temperatura 10cm (°C)',
-    'Presión atmosférica (mm Hg)',
-    'Radiación Solar Global (W/m2)'
-]
 
+# Definir las columnas esperadas
+expected_features = ['Velocidad del Viento (m/s)', 'Dirección del viento (Grados)',
+                     'Temperatura 10cm (°C)', 'Presión atmosférica (mm Hg)',
+                     'Radiación Solar Global (W/m2)']
+
+# Título
 st.title("Predicción de PM10 (ug/m3) en La Candelaria")
 
-# -------------------------
-# Subir archivo Excel
-# -------------------------
-st.subheader("1. Carga de Datos")
-file = st.file_uploader("Sube un archivo Excel (.xlsx)", type=["xlsx"])
+# Carga del archivo Excel
+uploaded_file = st.file_uploader("Sube tu archivo Excel (.xlsx)", type=["xlsx"])
 
-if file and models and scaler:
+if uploaded_file is not None and models and scaler:
     try:
-        df = pd.read_excel(file)
-        st.write("Vista previa de los datos cargados:")
+        df = pd.read_excel(uploaded_file)
+        st.subheader("Datos cargados:")
         st.dataframe(df.head())
 
-        # Verificación de columnas requeridas
+        # Verificar columnas faltantes
         missing_cols = [col for col in expected_features if col not in df.columns]
         if missing_cols:
-            st.error(f"Faltan columnas requeridas: {', '.join(missing_cols)}")
+            st.error(f"Faltan las siguientes columnas en el archivo: {', '.join(missing_cols)}")
             st.stop()
 
-        # Preprocesamiento
+        # Seleccionar y convertir
         X = df[expected_features].copy()
         for col in X.columns:
             X[col] = pd.to_numeric(X[col], errors='coerce')
 
+        # Imputación
         X.fillna(method='ffill', inplace=True)
         X.fillna(method='bfill', inplace=True)
 
+        # Mostrar datos procesados
+        st.subheader("Datos Procesados:")
+        st.dataframe(X.head())
+
+        # Escalado
         try:
             X_scaled = scaler.transform(X)
             X_scaled_df = pd.DataFrame(X_scaled, columns=expected_features)
         except Exception as e:
-            st.error(f"Error durante la escala de los datos: {e}")
+            st.error(f"Error al escalar los datos: {e}")
             st.stop()
 
-        st.subheader("2. Predicción con Diferentes Modelos")
-        for name, model in models.items():
-            try:
-                df[f'Predicción {name}'] = model.predict(X_scaled_df)
-                st.write(f"Predicciones con {name}:")
-                st.dataframe(df[[f'Predicción {name}']].head())
-            except Exception as e:
-                st.warning(f"No se pudo predecir con {name}: {e}")
+        st.subheader("Realizando Predicciones...")
 
-        st.subheader("3. Resultados Finales")
+        # Predicciones con todos los modelos
+        for name, model in models.items():
+            df[f'PM10 Predicho ({name})'] = model.predict(X_scaled_df)
+
+        # Mostrar resultados completos
+        st.subheader("Resultados Completos:")
         st.dataframe(df)
 
-        # Botón de descarga
+        # Opción de descarga
         @st.cache_data
-        def convert_df_to_excel(data):
-            return data.to_excel("predicciones_PM10.xlsx", index=False)
+        def convert_df_to_excel(df):
+            return df.to_excel("predicciones_PM10.xlsx", index=False)
 
-        convert_df_to_excel(df)
+        excel_data = convert_df_to_excel(df)
+
         st.download_button(
-            label="Descargar Resultados en Excel",
+            label="Descargar Predicciones (Excel)",
             data=open("predicciones_PM10.xlsx", "rb").read(),
             file_name="predicciones_PM10.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
 
     except Exception as e:
-        st.error(f"Ocurrió un error al procesar el archivo: {e}")
-
-elif not models:
-    st.warning("Los modelos no se pudieron cargar. Verifica los archivos .pkl.")
+        st.error(f"Ocurrió un error procesando el archivo: {e}")
+else:
+    if uploaded_file is None:
+        st.info("Por favor, sube un archivo Excel para continuar.")
+    if models is None:
+        st.warning("No se pudieron cargar los modelos. Verifica los archivos .pkl.")
 
 
