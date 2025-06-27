@@ -3,116 +3,131 @@ import pandas as pd
 import joblib
 from sklearn.preprocessing import StandardScaler
 import numpy as np
+import base64
+import io
 
-# Load the trained models and the scaler
-try:
-    linear_regression_model = joblib.load('linear_regression_model.pkl')
-    knn_model = joblib.load('knn_model.pkl')
-    svm_model = joblib.load('svm_model.pkl')
-    lasso_model = joblib.load('lasso_model.pkl')
-    decision_tree_model = joblib.load('decision_tree_model.pkl')
-    voting_regressor_model = joblib.load('voting_regressor_model.pkl')
-    random_forest_model = joblib.load('random_forest_model.pkl')
-    scaler = joblib.load('feature_scaler.pkl') # Load the scaler fitted on training features
-except FileNotFoundError:
-    st.error("Error: One or more model files or scaler file not found.")
-    st.stop() # Stop execution if files are missing
+# Function to download a template Excel file
+def get_excel_template(feature_cols):
+    """Generates an Excel template with the required feature columns."""
+    template_df = pd.DataFrame(columns=feature_cols)
+    output = io.BytesIO()
+    writer = pd.ExcelWriter(output, engine='xlsxwriter')
+    template_df.to_excel(writer, index=False, sheet_name='Sheet1')
+    writer.save()
+    processed_data = output.getvalue()
+    return processed_data
 
-st.title("Predicción de PM10")
+def get_binary_file_downloader_html(bin_file, file_label='File'):
+    """Generates HTML for a file download link."""
+    bin_str = base64.b64encode(bin_file).decode()
+    href = f'<a href="data:application/octet-stream;base64,{bin_str}" download="{file_label}.xlsx">Descargar plantilla</a>'
+    return href
 
-st.write("""
-Esta aplicación utiliza varios modelos de regresión para predecir los niveles de PM10
-basados en datos meteorológicos. Por favor, suba un archivo Excel con los datos a predecir.
-""")
+st.title("Aplicación de Predicción de Calidad del Aire")
 
-uploaded_file = st.file_uploader("Cargar archivo Excel", type=["xlsx"])
+st.write("Esta aplicación utiliza un modelo de Machine Learning para predecir la calidad del aire (PM10) basada en datos meteorológicos.")
+
+# Define the list of expected feature columns (based on your original notebook)
+# Ensure this list matches the columns used for training the models, excluding the target variable.
+# You might need to adjust this list based on the final features used in your models.
+feature_cols = ['Dirección del viento (Grados)', 'Presión atmosférica (mm Hg)', 'Radiación Solar Global (W/m2)', 'Temperatura 10cm (°C)']
+target_variable = 'PM10 (ug/m3)\nCondición Estándar' # Keep the target variable name for clarity
+
+# Option to download the template
+template_excel = get_excel_template(feature_cols)
+st.markdown(get_binary_file_downloader_html(template_excel, 'plantilla_prediccion'), unsafe_allow_html=True)
+
+
+# File uploader
+uploaded_file = st.file_uploader("Carga un archivo Excel (.xlsx) con los datos a predecir", type=["xlsx"])
 
 if uploaded_file is not None:
     try:
         # Read the uploaded Excel file
-        df_predict = pd.read_excel(uploaded_file)
+        prediction_df = pd.read_excel(uploaded_file)
+        st.write("Datos cargados:")
+        st.dataframe(prediction_df)
 
-        st.subheader("Datos Cargados:")
-        st.dataframe(df_predict.head())
-
-        # --- Data Preprocessing (Must match the training preprocessing) ---
-
-        # Define the columns that were used as features during training
-        # This should match the feature_cols list from your training code
-        # Check your training code's feature_cols list
-        # Example based on your training code (adjust if necessary):
-        feature_columns = ['Velocidad del Viento (m/s)', 'Dirección del viento (Grados)',
-                   'Temperatura 10cm (°C)', 'Presión atmosférica (mm Hg)', 
-                   'Radiación Solar Global (W/m2)']
-
-        # Check if the uploaded DataFrame contains all required feature columns
-        missing_cols = [col for col in feature_columns if col not in df_predict.columns]
+        # --- Data Preparation (Matching the original notebook) ---
+        # Ensure required columns are present
+        missing_cols = [col for col in feature_cols if col not in prediction_df.columns]
         if missing_cols:
-            st.error(f"Error: El archivo Excel cargado no contiene las siguientes columnas requeridas: {', '.join(missing_cols)}")
-            st.stop()
+            st.error(f"El archivo Excel cargado no contiene las siguientes columnas requeridas para la predicción: {', '.join(missing_cols)}")
+        else:
+            # Select only the feature columns for prediction
+            prediction_df_features = prediction_df[feature_cols]
 
-        # Select only the feature columns
-        X_predict = df_predict[feature_columns]
+            # Load the trained scaler
+            try:
+                scaler = joblib.load('feature_scaler.pkl') # Load the scaler used for features during training
+                st.write("Scaler cargado exitosamente.")
+            except FileNotFoundError:
+                st.error("Error: No se encontró el archivo del scaler ('feature_scaler.pkl'). Asegúrate de que está en el mismo directorio.")
+                scaler = None # Set scaler to None if not found
 
-        # Ensure numerical columns are treated as such (handle potential non-numeric entries)
-        for col in X_predict.columns:
-             X_predict[col] = pd.to_numeric(X_predict[col], errors='coerce')
+            if scaler is not None:
+                # Scale the features
+                try:
+                    prediction_df_scaled = scaler.transform(prediction_df_features)
+                    st.write("Datos escalados exitosamente.")
+                    prediction_df_scaled = pd.DataFrame(prediction_df_scaled, columns=feature_cols) # Convert back to DataFrame for consistency
 
-        # Handle potential NaN values that might arise from coercion (e.g., forward fill or mean imputation)
-        # For simplicity, let's use forward fill here, but choose a strategy that suits your data
-        X_predict.fillna(method='ffill', inplace=True)
-        X_predict.fillna(method='bfill', inplace=True) # Handle potential NaNs at the beginning
+                    # --- Model Loading and Prediction ---
+                    st.subheader("Selecciona el modelo para la predicción")
+                    model_option = st.selectbox(
+                        "Elige un modelo:",
+                        ('Linear Regression', 'KNN', 'SVR', 'Lasso', 'Decision Tree', 'Voting Regressor', 'Random Forest')
+                    )
 
-        # Apply the same scaling used during training
-        try:
-            X_predict_scaled = scaler.transform(X_predict)
-            X_predict_scaled_df = pd.DataFrame(X_predict_scaled, columns=feature_columns) # Keep as DataFrame
-        except Exception as e:
-            st.error(f"Error durante la escala de los datos: {e}")
-            st.stop()
+                    model_filename = None
+                    if model_option == 'Linear Regression':
+                        model_filename = 'linear_regression_model.pkl'
+                    elif model_option == 'KNN':
+                        model_filename = 'knn_model.pkl'
+                    elif model_option == 'SVR':
+                        model_filename = 'svm_model.pkl'
+                    elif model_option == 'Lasso':
+                        model_filename = 'lasso_model.pkl'
+                    elif model_option == 'Decision Tree':
+                        model_filename = 'decision_tree_model.pkl'
+                    elif model_option == 'Voting Regressor':
+                        model_filename = 'voting_regressor_model.pkl'
+                    elif model_option == 'Random Forest':
+                        model_filename = 'random_forest_model.pkl'
 
+                    if model_filename:
+                        try:
+                            # Load the selected model
+                            model = joblib.load(model_filename)
+                            st.write(f"{model_option} cargado exitosamente.")
 
-        st.subheader("Realizando Predicciones...")
+                            # Make predictions
+                            predictions = model.predict(prediction_df_scaled)
 
-        # --- Make Predictions using the loaded models ---
-        try:
-            df_predict['PM10 Predicho (Linear Regression)'] = linear_regression_model.predict(X_predict_scaled_df)
-            df_predict['PM10 Predicho (KNN)'] = knn_model.predict(X_predict_scaled_df)
-            df_predict['PM10 Predicho (SVR)'] = svm_model.predict(X_predict_scaled_df)
-            df_predict['PM10 Predicho (Lasso)'] = lasso_model.predict(X_predict_scaled_df)
-            df_predict['PM10 Predicho (Decision Tree)'] = decision_tree_model.predict(X_predict_scaled_df)
-            df_predict['PM10 Predicho (Voting Regressor)'] = voting_regressor_model.predict(X_predict_scaled_df)
-            df_predict['PM10 Predicho (Random Forest)'] = random_forest_model.predict(X_predict_scaled_df)
+                            # Add predictions to the original DataFrame
+                            prediction_df['PM10_Predicted'] = predictions
 
+                            st.subheader("Resultados de la Predicción:")
+                            st.dataframe(prediction_df)
 
-            st.subheader("Predicciones Generadas:")
-            st.dataframe(df_predict[['PM10 Predicho (Linear Regression)',
-                                     'PM10 Predicho (KNN)',
-                                     'PM10 Predicho (SVR)',
-                                     'PM10 Predicho (Lasso)',
-                                     'PM10 Predicho (Decision Tree)',
-                                     'PM10 Predicho (Voting Regressor)',
-                                     'PM10 Predicho (Random Forest)']])
+                            # Option to download the predictions
+                            output = io.BytesIO()
+                            with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+                                prediction_df.to_excel(writer, index=False, sheet_name='Predicciones')
+                            processed_data = output.getvalue()
 
-            # Option to download the results
-            @st.cache_data
-            def convert_df_to_excel(df):
-                # IMPORTANT: Cache the conversion to prevent dataframe conversion on every rerun
-                return df.to_excel("predicciones_PM10.xlsx", index=False)
-
-            excel_data = convert_df_to_excel(df_predict)
-
-            st.download_button(
-                label="Descargar Predicciones (Excel)",
-                data=open("predicciones_PM10.xlsx", "rb").read(), # Read the file directly
-                file_name="predicciones_PM10.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
+                            st.markdown(get_binary_file_downloader_html(processed_data, 'predicciones_PM10'), unsafe_allow_html=True)
 
 
-        except Exception as e:
-            st.error(f"Error durante la predicción: {e}")
+                        except FileNotFoundError:
+                            st.error(f"Error: No se encontró el archivo del modelo '{model_filename}'. Asegúrate de que todos los archivos de modelo entrenados están en el mismo directorio.")
+                        except Exception as e:
+                            st.error(f"Ocurrió un error al cargar el modelo o realizar la predicción: {e}")
+
+                except Exception as e:
+                    st.error(f"Ocurrió un error durante el escalado de los datos: {e}")
 
     except Exception as e:
-        st.error(f"Error al leer el archivo Excel: {e}")
+        st.error(f"Ocurrió un error al leer el archivo Excel: {e}")
+
 
