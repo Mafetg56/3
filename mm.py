@@ -45,7 +45,9 @@ models, scaler = load_models()
 
 # Define the expected feature columns in the order they were trained
 # This should match the feature_cols list from your training script
-expected_features = ['Dirección del viento (Grados)', 'Presión atmosférica (mm Hg)', 'Radiación Solar Global (W/m2)', 'Temperatura 10cm (°C)']
+expected_features = ['Velocidad del Viento (m/s)', 'Dirección del viento (Grados)',
+                   'Temperatura 10cm (°C)', 'Presión atmosférica (mm Hg)', 
+                   'Radiación Solar Global (W/m2)']
 
 
 st.title("Predicción de PM10 (ug/m3) en La Candelaria")
