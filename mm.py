@@ -41,8 +41,9 @@ if uploaded_file is not None:
         # This should match the feature_cols list from your training code
         # Check your training code's feature_cols list
         # Example based on your training code (adjust if necessary):
-        feature_columns = ['Dirección del viento (Grados)', 'Presión atmosférica (mm Hg)',
-                           'Radiación Solar Global (W/m2)', 'Temperatura 10cm (°C)']
+        feature_columns = ['Velocidad del Viento (m/s)', 'Dirección del viento (Grados)',
+                   'Temperatura 10cm (°C)', 'Presión atmosférica (mm Hg)', 
+                   'Radiación Solar Global (W/m2)']
 
         # Check if the uploaded DataFrame contains all required feature columns
         missing_cols = [col for col in feature_columns if col not in df_predict.columns]
