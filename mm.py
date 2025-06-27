@@ -2,92 +2,95 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import joblib
-from sklearn.preprocessing import StandardScaler
+import matplotlib.pyplot as plt
+import os # Import os module to check for file existence
 
-# Load the pre-trained models and scaler
-# Ensure these files ('random_forest_model.pkl', 'feature_scaler.pkl') exist
-# and are in the same directory or provide the correct path.
-try:
-    rf_model = joblib.load('random_forest_model.pkl')
-    feature_scaler = joblib.load('feature_scaler.pkl')
-    st.success("Modelos y scaler cargados exitosamente.")
-except FileNotFoundError:
-    st.error("Error: Asegúrate de que los archivos 'random_forest_model.pkl' y 'feature_scaler.pkl' existan.")
-    st.stop() # Stop the app if files are not found
+# Load the scaler and trained models
+# Use st.cache_resource to cache the loading of models and scaler
+@st.cache_resource
+def load_resources():
+  try:
+    scaler = joblib.load('feature_scaler.pkl')
+    linear_regression_model = joblib.load('linear_regression_model.pkl')
+    knn_model = joblib.load('knn_model.pkl')
+    svm_model = joblib.load('svm_model.pkl')
+    lasso_model = joblib.load('lasso_model.pkl')
+    decision_tree_model = joblib.load('decision_tree_model.pkl')
+    voting_regressor_model = joblib.load('voting_regressor_model.pkl')
+    random_forest_model = joblib.load('random_forest_model.pkl')
+    # gradient_boosting_model = joblib.load('gradient_boosting_model.pkl') # Uncomment if GBR model exists and is saved
 
+    # Create a dictionary of models
+    models = {
+        'Linear Regression': linear_regression_model,
+        'KNN': knn_model,
+        'SVM': svm_model,
+        'Lasso': lasso_model,
+        'Decision Tree': decision_tree_model,
+        'Voting Regressor': voting_regressor_model,
+        'Random Forest': random_forest_model,
+        # 'Gradient Boosting': gradient_boosting_model # Uncomment if GBR model exists and is saved
+    }
+    return scaler, models
+  except FileNotFoundError as e:
+    st.error(f"Error loading model or scaler: {e}. Please ensure the necessary files ('feature_scaler.pkl', 'linear_regression_model.pkl', etc.) are in the same directory as your Streamlit app.")
+    st.stop() # Stop the app if essential files are missing
+
+scaler, models = load_resources()
+
+# Define the feature columns used during training
+# Ensure this matches the feature_cols used in the training script
+feature_cols = ['Dirección del viento (Grados)', 'Presión atmosférica (mm Hg)', 'Radiación Solar Global (W/m2)', 'Temperatura 10cm (°C)'] # Adjust if your training script used different columns
+
+# Streamlit App Title
 st.title("Predicción de PM10 en La Candelaria")
 
-st.write("""
-Esta aplicación predice el nivel de PM10 basado en diferentes variables ambientales
-utilizando un modelo de Random Forest previamente entrenado.
-""")
+st.write("Esta aplicación utiliza modelos de regresión para predecir los niveles de PM10 basándose en datos meteorológicos.")
 
-st.header("Introduce los valores de las variables ambientales:")
+# User Input
+st.header("Ingrese los valores de las variables meteorológicas:")
 
-# Define input fields for the features used in the model
-# These should match the features the model was trained on
-# Based on the provided code, the features were:
-# 'Dirección del viento (Grados)', 'Presión atmosférica (mm Hg)',
-# 'Radiación Solar Global (W/m2)', 'Temperatura 10cm (°C)',
-# 'Velocidad del Viento (m/s)' (this was not explicitly dropped in the final features list)
-# Let's assume 'Velocidad del Viento (m/s)' is also a feature based on the prompt.
+# Create input fields for each feature
+user_inputs = {}
+for col in feature_cols:
+    user_inputs[col] = st.number_input(f"Ingrese el valor para {col}", value=0.0)
 
-# Inspect the feature_cols from your training script if possible
-# feature_cols = ['Dirección del viento (Grados)', 'Presión atmosférica (mm Hg)', 'Radiación Solar Global (W/m2)', 'Temperatura 10cm (°C)', 'Velocidad del Viento (m/s)'] # Example based on likely features
+# Create a DataFrame from user inputs
+input_df = pd.DataFrame([user_inputs])
 
-# Dynamically get feature names from the loaded scaler/model if possible
-# Or hardcode based on your training script
-# Assuming the features are:
-feature_names = ['Dirección del viento (Grados)', 'Presión atmosférica (mm Hg)',
-                 'Radiación Solar Global (W/m2)', 'Temperatura 10cm (°C)',
-                 'Velocidad del Viento (m/s)']
+# Scale the user inputs using the loaded scaler
+scaled_input = scaler.transform(input_df)
 
-input_data = {}
+# Convert the scaled input back to a DataFrame with the original feature names
+scaled_input_df = pd.DataFrame(scaled_input, columns=feature_cols)
 
-# Create input widgets for each feature
-for feature in feature_names:
-    # Provide sensible default values or ranges
-    if 'Dirección del viento' in feature:
-        input_data[feature] = st.slider(feature, min_value=0.0, max_value=360.0, value=180.0, step=0.1)
-    elif 'Presión atmosférica' in feature:
-        input_data[feature] = st.number_input(feature, min_value=0.0, value=700.0, step=1.0)
-    elif 'Radiación Solar Global' in feature:
-        input_data[feature] = st.number_input(feature, min_value=0.0, value=200.0, step=1.0)
-    elif 'Temperatura 10cm' in feature:
-        input_data[feature] = st.number_input(feature, value=20.0, step=0.1)
-    elif 'Velocidad del Viento' in feature:
-        input_data[feature] = st.number_input(feature, min_value=0.0, value=5.0, step=0.1)
-    else:
-         input_data[feature] = st.number_input(feature, value=0.0, step=0.1)
+# Model Selection
+st.header("Seleccione el modelo para la predicción:")
+selected_model_name = st.selectbox("Elija un modelo:", list(models.keys()))
 
+selected_model = models[selected_model_name]
 
-# Convert input data to a DataFrame
-input_df = pd.DataFrame([input_data])
-
-# Scale the relevant features using the loaded scaler
-# Ensure the columns to be scaled match the 'columns_to_scale' from your training script
-# which were ['Dirección del viento (Grados)', 'Presión atmosférica (mm Hg)', 'Radiación Solar Global (W/m2)', 'Temperatura 10cm (°C)']
-# Note: 'Velocidad del Viento (m/s)' was not in the original scaling list in your code.
-# You need to confirm if 'Velocidad del Viento (m/s)' should be scaled and update the scaler fitting accordingly.
-# For now, let's assume the scaler was fitted on the exact 'feature_cols' used for training X_train.
-
-# Assuming feature_scaler was fitted on the full feature_cols used for training:
-input_scaled = feature_scaler.transform(input_df)
-
-# Convert the scaled numpy array back to a DataFrame with correct column names
-input_scaled_df = pd.DataFrame(input_scaled, columns=feature_names)
-
-
+# Make Prediction
 if st.button("Predecir PM10"):
-    # Make prediction using the Random Forest model
-    prediction = rf_model.predict(input_scaled_df)
+    try:
+        prediction = selected_model.predict(scaled_input_df)
+        st.header("Resultado de la Predicción:")
+        st.success(f"La predicción de PM10 ({selected_model_name}) es: {prediction[0]:.4f} ug/m3")
 
-    st.header("Resultado de la Predicción:")
-    st.write(f"El nivel de PM10 predicho es: **{prediction[0]:.2f} ug/m3**")
+        # Optional: Show feature importances if the selected model has them (e.g., Random Forest)
+        if hasattr(selected_model, 'feature_importances_'):
+            st.subheader(f"Importancia de las Características ({selected_model_name})")
+            feature_importances = pd.Series(selected_model.feature_importances_, index=feature_cols).sort_values(ascending=False)
 
-st.sidebar.header("Información")
-st.sidebar.write("""
-Esta aplicación utiliza un modelo de Random Forest entrenado con datos
-históricos de calidad del aire en La Candelaria para predecir los niveles de PM10.
-""")
-st.sidebar.write("Desarrollado por [Tu Nombre o Organización]") # Optional: Add your name/organization
+            fig, ax = plt.subplots(figsize=(10, 6))
+            feature_importances.plot(kind='bar', ax=ax)
+            ax.set_title(f'Importancia de las Características para {selected_model_name}')
+            ax.set_ylabel('Importancia')
+            plt.xticks(rotation=45, ha='right')
+            plt.tight_layout()
+            st.pyplot(fig)
+    except Exception as e:
+        st.error(f"Ocurrió un error durante la predicción: {e}")
+
+st.markdown("---")
+st.write("Nota: Los valores de entrada se escalan automáticamente antes de la predicción utilizando el escalador entrenado.")
