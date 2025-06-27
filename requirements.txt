@@ -1,4 +1,6 @@
 pandas
 joblib
-os
 scikit-learn
+openpyxl
+matplotlib
+seaborn
