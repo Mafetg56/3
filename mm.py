@@ -4,94 +4,106 @@ from sklearn.preprocessing import StandardScaler
 import joblib
 import numpy as np
 
-# Define the file paths for the saved models and scaler
-linear_regression_model_filename = 'linear_regression_model.pkl'
-knn_model_filename = 'knn_model.pkl'
-svm_model_filename = 'svm_model.pkl'
-lasso_model_filename = 'lasso_model.pkl'
-decision_tree_model_filename = 'decision_tree_model.pkl'
-voting_regressor_model_filename = 'voting_regressor_model.pkl'
-random_forest_model_filename = 'random_forest_model.pkl'
-feature_scaler_filename = 'feature_scaler.pkl'
-# Add gradient boosting model filename if it exists
-# gradient_boosting_model_filename = 'gradient_boosting_model.pkl'
-
-
-# Load the models and scaler
+# -------------------------
+# Cargar modelos y scaler
+# -------------------------
 @st.cache_resource
 def load_models():
-    models = {}
     try:
-        models['Linear Regression'] = joblib.load(linear_regression_model_filename)
-        models['KNN'] = joblib.load(knn_model_filename)
-        models['SVR'] = joblib.load(svm_model_filename)
-        models['Lasso'] = joblib.load(lasso_model_filename)
-        models['Decision Tree'] = joblib.load(decision_tree_model_filename)
-        models['Voting Regressor'] = joblib.load(voting_regressor_model_filename)
-        models['Random Forest'] = joblib.load(random_forest_model_filename)
-        # Load gradient boosting model if it exists
-        # models['Gradient Boosting'] = joblib.load(gradient_boosting_model_filename)
-
-        scaler = joblib.load(feature_scaler_filename)
+        models = {
+            'Linear Regression': joblib.load('linear_regression_model.pkl'),
+            'KNN': joblib.load('knn_model.pkl'),
+            'SVR': joblib.load('svm_model.pkl'),
+            'Lasso': joblib.load('lasso_model.pkl'),
+            'Decision Tree': joblib.load('decision_tree_model.pkl'),
+            'Voting Regressor': joblib.load('voting_regressor_model.pkl'),
+            'Random Forest': joblib.load('random_forest_model.pkl')
+        }
+        scaler = joblib.load('feature_scaler.pkl')
         return models, scaler
     except FileNotFoundError as e:
-        st.error(f"Error loading model or scaler file: {e}. Please ensure the model and scaler files are in the correct directory.")
+        st.error(f"Error cargando archivos: {e}")
         return None, None
     except Exception as e:
-        st.error(f"An error occurred while loading models: {e}")
+        st.error(f"Error inesperado al cargar modelos: {e}")
         return None, None
 
+# -------------------------
+# Configuración inicial
+# -------------------------
 models, scaler = load_models()
-
-# Define the expected feature columns in the order they were trained
-# This should match the feature_cols list from your training script
-expected_features = ['Velocidad del Viento (m/s)', 'Dirección del viento (Grados)',
-                   'Temperatura 10cm (°C)', 'Presión atmosférica (mm Hg)', 
-                   'Radiación Solar Global (W/m2)']
-
+expected_features = [
+    'Velocidad del Viento (m/s)',
+    'Dirección del viento (Grados)',
+    'Temperatura 10cm (°C)',
+    'Presión atmosférica (mm Hg)',
+    'Radiación Solar Global (W/m2)'
+]
 
 st.title("Predicción de PM10 (ug/m3) en La Candelaria")
 
-if models and scaler:
-    st.sidebar.header("Seleccione los Parámetros de Entrada")
+# -------------------------
+# Subir archivo Excel
+# -------------------------
+st.subheader("1. Carga de Datos")
+file = st.file_uploader("Sube un archivo Excel (.xlsx)", type=["xlsx"])
 
-    # Create input fields for each feature
-    input_data = {}
-    for feature in expected_features:
-        input_data[feature] = st.sidebar.number_input(f"Ingrese {feature}", value=0.0) # You can set a default value
-
-    # Create a DataFrame from the input data
-    input_df = pd.DataFrame([input_data])
-
-    # Scale the input data using the loaded scaler
+if file and models and scaler:
     try:
-        scaled_input = scaler.transform(input_df)
-        scaled_input_df = pd.DataFrame(scaled_input, columns=expected_features)
-    except Exception as e:
-        st.error(f"Error during scaling of input data: {e}")
-        st.stop()
+        df = pd.read_excel(file)
+        st.write("Vista previa de los datos cargados:")
+        st.dataframe(df.head())
 
-    st.subheader("Valores de Entrada (Escalados)")
-    st.write(scaled_input_df)
+        # Verificación de columnas requeridas
+        missing_cols = [col for col in expected_features if col not in df.columns]
+        if missing_cols:
+            st.error(f"Faltan columnas requeridas: {', '.join(missing_cols)}")
+            st.stop()
 
-    st.sidebar.header("Seleccione el Modelo para Predecir")
-    selected_model_name = st.sidebar.selectbox("Modelo", list(models.keys()))
+        # Preprocesamiento
+        X = df[expected_features].copy()
+        for col in X.columns:
+            X[col] = pd.to_numeric(X[col], errors='coerce')
 
-    selected_model = models[selected_model_name]
+        X.fillna(method='ffill', inplace=True)
+        X.fillna(method='bfill', inplace=True)
 
-    # Make prediction
-    if st.sidebar.button("Predecir"):
         try:
-            prediction = selected_model.predict(scaled_input_df)
-            st.subheader(f"Predicción de PM10 ({selected_model_name})")
-            st.success(f"La predicción de PM10 es: {prediction[0]:.4f} ug/m3")
+            X_scaled = scaler.transform(X)
+            X_scaled_df = pd.DataFrame(X_scaled, columns=expected_features)
         except Exception as e:
-            st.error(f"An error occurred during prediction: {e}")
+            st.error(f"Error durante la escala de los datos: {e}")
+            st.stop()
 
-    st.sidebar.markdown("---")
-    st.sidebar.write("Nota: Asegúrese de que los archivos del modelo (.pkl) y el scaler (.pkl) estén en el mismo directorio que la aplicación Streamlit.")
+        st.subheader("2. Predicción con Diferentes Modelos")
+        for name, model in models.items():
+            try:
+                df[f'Predicción {name}'] = model.predict(X_scaled_df)
+                st.write(f"Predicciones con {name}:")
+                st.dataframe(df[[f'Predicción {name}']].head())
+            except Exception as e:
+                st.warning(f"No se pudo predecir con {name}: {e}")
 
-else:
-    st.warning("No se pudieron cargar los modelos. Por favor, asegúrese de que los archivos existen.")
+        st.subheader("3. Resultados Finales")
+        st.dataframe(df)
+
+        # Botón de descarga
+        @st.cache_data
+        def convert_df_to_excel(data):
+            return data.to_excel("predicciones_PM10.xlsx", index=False)
+
+        convert_df_to_excel(df)
+        st.download_button(
+            label="Descargar Resultados en Excel",
+            data=open("predicciones_PM10.xlsx", "rb").read(),
+            file_name="predicciones_PM10.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+
+    except Exception as e:
+        st.error(f"Ocurrió un error al procesar el archivo: {e}")
+
+elif not models:
+    st.warning("Los modelos no se pudieron cargar. Verifica los archivos .pkl.")
 
 
